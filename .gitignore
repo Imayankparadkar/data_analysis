@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+venv*/
+ENV/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.*
+
+# VSCode settings
+.vscode/
+
+# macOS system files
+.DS_Store
+
+# Logs and local data
+*.log
+*.sqlite3
+instance/
+uploads/
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Flask cache
+*.db
+*.pid
+
+# Other
+*.bak
+*.swp
