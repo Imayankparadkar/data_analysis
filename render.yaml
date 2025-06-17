@@ -1,10 +1,14 @@
 services:
   - type: web
-    name: streamlit-app
+    name: smart-data-analysis-chat
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port=10000 --server.address=0.0.0.0 --server.enableCORS=false --server.headless=true --server.enableXsrfProtection=false
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
-      - key: PORT
-        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

@@ -7,16 +7,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import google.generativeai as genai
-from dotenv import load_dotenv
 import os
 import json
 import re
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
-
-# Load environment variables
-load_dotenv()
 
 # Configure page
 st.set_page_config(
@@ -78,12 +74,25 @@ st.markdown("""
 # Configure Gemini API
 @st.cache_resource
 def initialize_gemini():
+    # Try to get API key from environment variables (Render environment variables)
     api_key = os.getenv('GEMINI_API_KEY')
+    
     if not api_key:
-        st.error("❌ GEMINI_API_KEY not found. Please set it in your .env file.")
+        # If not found in environment, try Streamlit secrets (fallback)
+        try:
+            api_key = st.secrets["GEMINI_API_KEY"]
+        except:
+            st.error("❌ GEMINI_API_KEY not found. Please set it in your Render environment variables.")
+            st.info("🔧 In Render dashboard, go to Environment → Add Environment Variable → GEMINI_API_KEY")
+            st.stop()
+    
+    try:
+        genai.configure(api_key=api_key)
+        return genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.error(f"❌ Error initializing Gemini API: {str(e)}")
+        st.info("Please check your API key is valid and try again.")
         st.stop()
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-1.5-flash')
 
 # Initialize session state
 def initialize_session_state():
@@ -608,650 +617,393 @@ def generate_comprehensive_insights_with_gemini(query, data_context, model):
             "key_insights": ["Error in analysis - please try again"],
             "numerical_findings": ["Analysis could not be completed"],
             "statistical_summary": ["Please retry the analysis"],
-            "data_quality_assessment": ["Analysis interrupted"],
+           "data_quality_assessment": ["Analysis could not be completed"],
             "visualization_recommendations": [],
-            "business_insights": ["Please try a different question"],
-            "follow_up_questions": ["Please rephrase your question"],
-            "primary_visualization": {"chart_type": None, "x_column": None, "y_column": None, "description": "No visualization available"}
+            "business_insights": ["Please check your data and try again"],
+            "follow_up_questions": ["What type of analysis would you like to perform?"],
+            "primary_visualization": {
+                "chart_type": "overview_dashboard",
+                "x_column": None,
+                "y_column": None,
+                "description": "Basic overview"
+            }
         }
 
+def display_insights_ui(insights):
+    """Display insights in an organized UI"""
+    
+    # Direct answer in a prominent box
+    st.markdown(f"""
+    <div class="insight-box">
+        <h3>🎯 Analysis Result</h3>
+        <p>{insights.get('direct_answer', 'No direct answer available')}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Create tabs for different types of insights
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🔍 Key Insights", 
+        "📊 Numbers & Stats", 
+        "📈 Visualizations", 
+        "💼 Business Impact", 
+        "❓ Follow-up"
+    ])
+    
+    with tab1:
+        st.subheader("Key Insights")
+        for i, insight in enumerate(insights.get('key_insights', []), 1):
+            st.markdown(f"**{i}.** {insight}")
+        
+        if 'statistical_summary' in insights:
+            st.subheader("Statistical Summary")
+            for stat in insights['statistical_summary']:
+                st.markdown(f"• {stat}")
+    
+    with tab2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Numerical Findings")
+            for finding in insights.get('numerical_findings', []):
+                st.markdown(f"📈 {finding}")
+        
+        with col2:
+            st.subheader("Data Quality")
+            for quality in insights.get('data_quality_assessment', []):
+                st.markdown(f"🔍 {quality}")
+    
+    with tab3:
+        st.subheader("Recommended Visualizations")
+        viz_recs = insights.get('visualization_recommendations', [])
+        
+        if viz_recs:
+            for i, viz in enumerate(viz_recs):
+                with st.expander(f"📊 {viz.get('chart_type', 'Chart').replace('_', ' ').title()} - {viz.get('priority', 'medium').upper()} Priority"):
+                    st.write(f"**Description:** {viz.get('description', 'No description')}")
+                    if viz.get('x_column'):
+                        st.write(f"**X-axis:** {viz['x_column']}")
+                    if viz.get('y_column'):
+                        st.write(f"**Y-axis:** {viz['y_column']}")
+                    if viz.get('color_column'):
+                        st.write(f"**Color by:** {viz['color_column']}")
+                    
+                    # Create visualization button
+                    if st.button(f"Create {viz.get('chart_type', 'chart').replace('_', ' ').title()}", key=f"viz_{i}"):
+                        create_and_display_chart(viz)
+        else:
+            st.info("No specific visualization recommendations available.")
+    
+    with tab4:
+        st.subheader("Business Insights")
+        business_insights = insights.get('business_insights', [])
+        if business_insights:
+            for insight in business_insights:
+                st.markdown(f"💡 {insight}")
+        else:
+            st.info("No business insights available for this analysis.")
+    
+    with tab5:
+        st.subheader("Suggested Follow-up Questions")
+        follow_ups = insights.get('follow_up_questions', [])
+        if follow_ups:
+            for i, question in enumerate(follow_ups):
+                if st.button(f"❓ {question}", key=f"followup_{i}"):
+                    st.session_state.chat_history.append({"role": "user", "content": question})
+                    st.rerun()
+        else:
+            st.info("No follow-up questions available.")
+
+def create_and_display_chart(viz_config):
+    """Create and display chart based on configuration"""
+    if st.session_state.current_data is not None:
+        chart = create_comprehensive_visualizations(
+            st.session_state.current_data,
+            viz_config.get('chart_type', 'overview_dashboard'),
+            viz_config.get('x_column'),
+            viz_config.get('y_column'),
+            viz_config.get('description', ''),
+            viz_config.get('color_column')
+        )
+        
+        if chart:
+            st.plotly_chart(chart, use_container_width=True)
+        else:
+            st.error("Could not create the requested visualization.")
+
 def main():
-    # Initialize everything
+    # Initialize
     initialize_session_state()
     model = initialize_gemini()
     
-    # Header with custom styling
-    st.markdown('<div class="main-header"><h1>🤖 Smart Data Analysis Chat</h1><p>Upload your CSV data and get comprehensive AI-powered insights!</p></div>', unsafe_allow_html=True)
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🤖 Smart Data Analysis Chat</h1>
+        <p>Upload your data and chat with AI to get instant insights and visualizations</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Settings & Upload")
+        st.header("📂 Data Upload")
         
-        # Data upload
         uploaded_file = st.file_uploader(
-            "📁 Choose a CSV file",
+            "Choose a CSV file",
             type=['csv'],
             help="Upload a CSV file to start analyzing your data"
         )
         
         if uploaded_file is not None:
             try:
-                with st.spinner("🔄 Processing your data..."):
-                    # Read CSV with error handling
-                    df = pd.read_csv(uploaded_file)
-                    
-                    # Clean column names
-                    df.columns = df.columns.str.strip()
-                    
-                    # Auto-detect and convert data types
-                    for col in df.columns:
-                        if df[col].dtype == 'object':
-                            # Try to convert to numeric
-                            numeric_series = pd.to_numeric(df[col], errors='coerce')
-                            if not numeric_series.isna().all():
-                                df[col] = numeric_series
-                            # Try to convert to datetime
-                            elif df[col].str.contains(r'\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}', na=False).any():
-                                try:
-                                    df[col] = pd.to_datetime(df[col], errors='coerce')
-                                except:
-                                    pass
-                    
-                    # Store in session state
-                    st.session_state.current_data = df
+                # Load data
+                df = pd.read_csv(uploaded_file)
+                st.session_state.current_data = df
+                
+                # Analyze data
+                with st.spinner("Analyzing your data..."):
                     st.session_state.data_info = comprehensive_data_analysis(df)
                 
                 st.success(f"✅ Data loaded successfully!")
                 
-                # Enhanced data preview
-                with st.expander("👀 Data Preview", expanded=True):
-                    st.dataframe(df.head(10), use_container_width=True)
-                
-                # Data summary metrics
-                with st.expander("📊 Quick Stats", expanded=True):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f'<div class="metric-container"><b>Rows:</b> {df.shape[0]:,}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-container"><b>Numeric Cols:</b> {len(st.session_state.data_info["basic_info"]["numeric_columns"])}</div>', unsafe_allow_html=True)
-                    with col2:
-                        st.markdown(f'<div class="metric-container"><b>Columns:</b> {df.shape[1]}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-container"><b>Categorical Cols:</b> {len(st.session_state.data_info["basic_info"]["categorical_columns"])}</div>', unsafe_allow_html=True)
-                
-                # Data quality indicators
-                with st.expander("🔍 Data Quality", expanded=False):
-                    completeness = st.session_state.data_info['data_quality']['completeness_score']
-                    duplicates = st.session_state.data_info['data_quality']['duplicate_percentage']
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Completeness", f"{completeness:.1f}%", 
-                                delta=f"{completeness-80:.1f}%" if completeness > 80 else f"{completeness-80:.1f}%")
-                    with col2:
-                        st.metric("Duplicates", f"{duplicates:.1f}%",
-                                delta=f"-{duplicates:.1f}%" if duplicates < 5 else f"{duplicates:.1f}%")
-                    with col3:
-                        memory_mb = st.session_state.data_info['data_quality']['memory_usage_mb']
-                        st.metric("Memory Usage", f"{memory_mb:.1f} MB")
+                # Display basic info
+                st.markdown(f"""
+                <div class="metric-container">
+                    <h4>📊 Dataset Overview</h4>
+                    <p><strong>Rows:</strong> {df.shape[0]:,}</p>
+                    <p><strong>Columns:</strong> {df.shape[1]}</p>
+                    <p><strong>Completeness:</strong> {st.session_state.data_info['data_quality']['completeness_score']:.1f}%</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
             except Exception as e:
-                st.error(f"❌ Error loading file: {str(e)}")
-                st.info("💡 Please ensure your CSV file is properly formatted")
+                st.error(f"Error loading file: {str(e)}")
+        
+        # Quick stats if data is loaded
+        if st.session_state.current_data is not None:
+            st.header("🔍 Quick Stats")
+            
+            data_info = st.session_state.data_info
+            
+            # Metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Rows", f"{data_info['basic_info']['shape'][0]:,}")
+                st.metric("Numeric Cols", len(data_info['basic_info']['numeric_columns']))
+            
+            with col2:
+                st.metric("Total Columns", data_info['basic_info']['shape'][1])
+                st.metric("Text Cols", len(data_info['basic_info']['categorical_columns']))
+            
+            # Data quality indicators
+            st.subheader("Data Quality")
+            completeness = data_info['data_quality']['completeness_score']
+            
+            if completeness >= 90:
+                st.success(f"Excellent: {completeness:.1f}% complete")
+            elif completeness >= 70:
+                st.warning(f"Good: {completeness:.1f}% complete")
+            else:
+                st.error(f"Needs attention: {completeness:.1f}% complete")
+            
+            duplicates = data_info['data_quality']['duplicate_percentage']
+            if duplicates > 0:
+                st.info(f"📋 {duplicates:.1f}% duplicate rows")
     
     # Main content area
     if st.session_state.current_data is not None:
-        df = st.session_state.current_data
-        data_info = st.session_state.data_info
+        # Chat interface
+        st.header("💬 Chat with Your Data")
         
-        # Create tabs for different sections
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 AI Chat", "📊 Visualizations", "📈 Statistics", "🔍 Data Explorer", "📋 Summary Report"])
+        # Display chat history
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                if message["role"] == "assistant" and "insights" in message:
+                    display_insights_ui(message["insights"])
+                else:
+                    st.markdown(message["content"])
         
-        with tab1:
-            st.header("🤖 AI-Powered Data Analysis")
+        # Chat input
+        if prompt := st.chat_input("Ask anything about your data..."):
+            # Add user message to chat history
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
             
-            # Quick action buttons
-            st.subheader("🚀 Quick Analysis")
-            col1, col2, col3, col4 = st.columns(4)
+            # Display user message
+            with st.chat_message("user"):
+                st.markdown(prompt)
             
-            with col1:
-                if st.button("📊 Overall Summary", use_container_width=True):
-                    st.session_state.chat_query = "Give me a comprehensive summary of this dataset including key statistics, patterns, and insights"
-            
-            with col2:
-                if st.button("🔍 Find Patterns", use_container_width=True):
-                    st.session_state.chat_query = "Identify interesting patterns, correlations, and anomalies in this data"
-            
-            with col3:
-                if st.button("📈 Best Visualizations", use_container_width=True):
-                    st.session_state.chat_query = "Recommend the best visualizations for this dataset and explain why"
-            
-            with col4:
-                if st.button("⚠️ Data Quality Issues", use_container_width=True):
-                    st.session_state.chat_query = "Analyze data quality issues, missing values, outliers, and suggest improvements"
-            
-            # Chat interface
-            st.subheader("💭 Ask Questions About Your Data")
-            
-            # Sample questions
-            with st.expander("💡 Sample Questions"):
-                sample_questions = [
-                    "What are the main trends in my data?",
-                    "Which variables are most strongly correlated?",
-                    "Are there any outliers I should be concerned about?",
-                    "What's the distribution of my key variables?",
-                    "Can you identify any missing data patterns?",
-                    "What business insights can you derive from this data?",
-                    "Which visualization would best show my data relationships?",
-                    "Are there any data quality issues I should address?"
-                ]
-                for question in sample_questions:
-                    if st.button(f"🔸 {question}", key=f"sample_{hash(question)}"):
-                        st.session_state.chat_query = question
-            
-            # Chat input
-            user_query = st.text_input(
-                "🎯 Ask me anything about your data:",
-                value=getattr(st.session_state, 'chat_query', ''),
-                placeholder="e.g., 'What are the strongest correlations in my data?' or 'Show me outliers in sales column'"
-            )
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                analyze_button = st.button("🔍 Analyze", type="primary", use_container_width=True)
-            with col2:
-                if st.button("🗑️ Clear Chat History", use_container_width=True):
-                    st.session_state.chat_history = []
-                    st.rerun()
-            
-            # Process query
-            if analyze_button and user_query:
-                with st.spinner("🧠 AI is analyzing your data..."):
-                    try:
-                        # Generate insights using Gemini
-                        insights = generate_comprehensive_insights_with_gemini(user_query, data_info, model)
-                        
-                        # Add to chat history
-                        st.session_state.chat_history.append({
-                            'query': user_query,
-                            'insights': insights,
-                            'timestamp': datetime.now()
-                        })
-                        
-                        # Store for visualization
-                        st.session_state.current_insights = insights
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error analyzing data: {str(e)}")
-            
-            # Display chat history
-            if st.session_state.chat_history:
-                st.subheader("💬 Analysis Results")
-                
-                for i, chat in enumerate(reversed(st.session_state.chat_history[-5:])):  # Show last 5
-                    with st.container():
-                        st.markdown(f"**🙋 Question:** {chat['query']}")
-                        
-                        insights = chat['insights']
-                        
-                        # Main answer
-                        st.markdown(f'<div class="insight-box"><h4>🎯 Analysis Result</h4><p>{insights.get("direct_answer", "No analysis available")}</p></div>', unsafe_allow_html=True)
-                        
-                        # Key insights
-                        if insights.get('key_insights'):
-                            st.markdown("**🔍 Key Insights:**")
-                            for insight in insights['key_insights'][:5]:
-                                st.markdown(f"• {insight}")
-                        
-                        # Numerical findings
-                        if insights.get('numerical_findings'):
-                            with st.expander("📊 Numerical Findings"):
-                                for finding in insights['numerical_findings']:
-                                    st.markdown(f"• {finding}")
-                        
-                        # Show primary visualization if recommended
-                        if insights.get('primary_visualization') and insights['primary_visualization'].get('chart_type'):
-                            viz_rec = insights['primary_visualization']
-                            if viz_rec['chart_type']:
-                                st.markdown("**📈 Recommended Visualization:**")
-                                fig = create_comprehensive_visualizations(
-                                    df, 
-                                    viz_rec['chart_type'],
-                                    viz_rec.get('x_column'),
-                                    viz_rec.get('y_column'),
-                                    f"Analysis: {chat['query'][:50]}..."
-                                )
-                                if fig:
-                                    st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Follow-up questions
-                        if insights.get('follow_up_questions'):
-                            st.markdown("**🤔 Suggested Follow-up Questions:**")
-                            cols = st.columns(len(insights['follow_up_questions'][:3]))
-                            for j, follow_up in enumerate(insights['follow_up_questions'][:3]):
-                                with cols[j]:
-                                    if st.button(f"🔸 {follow_up[:30]}{'...' if len(follow_up) > 30 else ''}", 
-                                               key=f"followup_{i}_{j}"):
-                                        st.session_state.chat_query = follow_up
-                                        st.rerun()
-                        
-                        st.markdown("---")
-        
-        with tab2:
-            st.header("📊 Interactive Visualizations")
-            
-            # Visualization controls
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                viz_type = st.selectbox(
-                    "📈 Chart Type",
-                    ["overview_dashboard", "correlation_heatmap", "distribution_analysis", 
-                     "advanced_scatter", "categorical_analysis", "time_series", "multi_variable"],
-                    format_func=lambda x: {
-                        "overview_dashboard": "📊 Overview Dashboard",
-                        "correlation_heatmap": "🔥 Correlation Heatmap", 
-                        "distribution_analysis": "📈 Distribution Analysis",
-                        "advanced_scatter": "🎯 Advanced Scatter Plot",
-                        "categorical_analysis": "📋 Categorical Analysis",
-                        "time_series": "📅 Time Series",
-                        "multi_variable": "🌐 Multi-Variable Analysis"
-                    }.get(x, x)
-                )
-            
-            with col2:
-                numeric_cols = data_info['basic_info']['numeric_columns']
-                categorical_cols = data_info['basic_info']['categorical_columns']
-                all_cols = df.columns.tolist()
-                
-                x_col = st.selectbox("🔤 X-Axis Column", [None] + all_cols, 
-                                   index=1 if len(all_cols) > 0 else 0)
-            
-            with col3:
-                y_col = st.selectbox("📊 Y-Axis Column", [None] + numeric_cols,
-                                   index=1 if len(numeric_cols) > 0 else 0)
-            
-            # Color column (optional)
-            color_col = st.selectbox("🎨 Color Column (Optional)", [None] + categorical_cols + numeric_cols[:3])
-            
-            # Generate visualization
-            if st.button("🎨 Generate Visualization", type="primary"):
-                with st.spinner("Creating visualization..."):
-                    fig = create_comprehensive_visualizations(df, viz_type, x_col, y_col, 
-                                                            f"{viz_type.replace('_', ' ').title()}", color_col)
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Provide insights about the visualization
-                        with st.expander("🔍 Visualization Insights"):
-                            viz_query = f"Analyze this {viz_type.replace('_', ' ')} visualization showing {x_col} vs {y_col if y_col else 'data distribution'}. What patterns, trends, or insights can you identify?"
-                            viz_insights = generate_comprehensive_insights_with_gemini(viz_query, data_info, model)
-                            st.markdown(viz_insights.get('direct_answer', 'Analysis not available'))
-            
-            # Quick visualization grid
-            st.subheader("🚀 Quick Visualizations")
-            
-            if numeric_cols:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Distribution of first numeric column
-                    if len(numeric_cols) > 0:
-                        fig_dist = create_comprehensive_visualizations(df, 'distribution_analysis', 
-                                                                     None, numeric_cols[0], 
-                                                                     f"Distribution of {numeric_cols[0]}")
-                        if fig_dist:
-                            st.plotly_chart(fig_dist, use_container_width=True, key="dist1")
-                
-                with col2:
-                    # Correlation heatmap if multiple numeric columns
-                    if len(numeric_cols) > 1:
-                        fig_corr = create_comprehensive_visualizations(df, 'correlation_heatmap')
-                        if fig_corr:
-                            st.plotly_chart(fig_corr, use_container_width=True, key="corr1")
-            
-            # Categorical analysis
-            if categorical_cols:
-                st.subheader("📋 Categorical Data Analysis")
-                selected_cat = st.selectbox("Select categorical column:", categorical_cols)
-                if selected_cat:
-                    fig_cat = create_comprehensive_visualizations(df, 'categorical_analysis', 
-                                                                selected_cat, None, 
-                                                                f"Analysis of {selected_cat}")
-                    if fig_cat:
-                        st.plotly_chart(fig_cat, use_container_width=True)
-        
-        with tab3:
-            st.header("📈 Statistical Analysis")
-            
-            # Summary statistics
-            if numeric_cols:
-                st.subheader("📊 Descriptive Statistics")
-                
-                # Enhanced statistics table
-                stats_df = df[numeric_cols].describe().round(3)
-                
-                # Add additional statistics
-                additional_stats = pd.DataFrame({
-                    col: {
-                        'skewness': df[col].skew(),
-                        'kurtosis': df[col].kurtosis(),
-                        'variance': df[col].var(),
-                        'std_error': df[col].sem(),
-                        'range': df[col].max() - df[col].min(),
-                        'iqr': df[col].quantile(0.75) - df[col].quantile(0.25),
-                        'cv': df[col].std() / df[col].mean() if df[col].mean() != 0 else 0
-                    } for col in numeric_cols
-                }).round(3)
-                
-                # Combine statistics
-                full_stats = pd.concat([stats_df, additional_stats])
-                st.dataframe(full_stats, use_container_width=True)
-                
-                # Statistical insights
-                with st.expander("🧠 Statistical Insights"):
-                    stats_query = "Provide detailed statistical insights about the numeric variables including distribution characteristics, skewness, outliers, and what these statistics tell us about the data"
-                    stats_insights = generate_comprehensive_insights_with_gemini(stats_query, data_info, model)
-                    st.markdown(stats_insights.get('direct_answer', 'Statistical analysis not available'))
-            
-            # Correlation analysis
-            if len(numeric_cols) > 1:
-                st.subheader("🔗 Correlation Analysis")
-                
-                corr_matrix = df[numeric_cols].corr()
-                
-                # Display correlation matrix
-                fig_corr = px.imshow(corr_matrix.round(3), 
-                                   text_auto=True, 
-                                   aspect="auto",
-                                   title="Correlation Matrix",
-                                   color_continuous_scale='RdBu_r')
-                st.plotly_chart(fig_corr, use_container_width=True)
-                
-                # Strong correlations
-                strong_corr = []
-                for i in range(len(corr_matrix.columns)):
-                    for j in range(i+1, len(corr_matrix.columns)):
-                        corr_val = corr_matrix.iloc[i, j]
-                        if abs(corr_val) > 0.5:
-                            strong_corr.append({
-                                'Variable 1': corr_matrix.columns[i],
-                                'Variable 2': corr_matrix.columns[j],
-                                'Correlation': corr_val,
-                                'Strength': 'Strong' if abs(corr_val) > 0.7 else 'Moderate'
-                            })
-                
-                if strong_corr:
-                    st.subheader("💪 Strong Correlations")
-                    corr_df = pd.DataFrame(strong_corr).sort_values('Correlation', key=abs, ascending=False)
-                    st.dataframe(corr_df, use_container_width=True)
-            
-            # Missing values analysis
-            if data_info['missing_values']:
-                st.subheader("❓ Missing Values Analysis")
-                
-                missing_data = []
-                for col, missing_count in data_info['missing_values'].items():
-                    if missing_count > 0:
-                        missing_data.append({
-                            'Column': col,
-                            'Missing Count': missing_count,
-                            'Missing %': round(missing_count / len(df) * 100, 2),
-                            'Data Type': str(df[col].dtype)
-                        })
-                
-                if missing_data:
-                    missing_df = pd.DataFrame(missing_data).sort_values('Missing %', ascending=False)
-                    st.dataframe(missing_df, use_container_width=True)
-                    
-                    # Missing values heatmap
-                    if len(missing_data) > 1:
-                        missing_matrix = df.isnull()
-                        fig_missing = px.imshow(missing_matrix.T, 
-                                              title="Missing Values Pattern",
-                                              labels=dict(x="Row Index", y="Columns"))
-                        st.plotly_chart(fig_missing, use_container_width=True)
-        
-        with tab4:
-            st.header("🔍 Data Explorer")
-            
-            # Data filtering
-            st.subheader("🎯 Filter Data")
-            
-            # Create filters
-            filters = {}
-            
-            # Numeric filters
-            if numeric_cols:
-                st.markdown("**📊 Numeric Filters:**")
-                for col in numeric_cols[:5]:  # Limit to first 5 numeric columns
-                    col_min, col_max = float(df[col].min()), float(df[col].max())
-                    if col_min != col_max:
-                        filters[col] = st.slider(
-                            f"{col}",
-                            min_value=col_min,
-                            max_value=col_max,
-                            value=(col_min, col_max),
-                            step=(col_max - col_min) / 100
-                        )
-            
-            # Categorical filters
-            if categorical_cols:
-                st.markdown("**📋 Categorical Filters:**")
-                for col in categorical_cols[:3]:  # Limit to first 3 categorical columns
-                    unique_values = df[col].dropna().unique()
-                    if len(unique_values) <= 20:  # Only show filter if manageable number of categories
-                        filters[col] = st.multiselect(
-                            f"{col}",
-                            options=unique_values,
-                            default=unique_values
-                        )
-            
-            # Apply filters
-            filtered_df = df.copy()
-            for col, filter_val in filters.items():
-                if col in numeric_cols and isinstance(filter_val, tuple):
-                    filtered_df = filtered_df[
-                        (filtered_df[col] >= filter_val[0]) & 
-                        (filtered_df[col] <= filter_val[1])
-                    ]
-                elif col in categorical_cols and filter_val:
-                    filtered_df = filtered_df[filtered_df[col].isin(filter_val)]
-            
-            # Show filtered results
-            st.subheader(f"📋 Filtered Data ({len(filtered_df)} rows)")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Rows", f"{len(filtered_df):,}", f"{len(filtered_df) - len(df):,}")
-            with col2:
-                st.metric("% of Original", f"{len(filtered_df)/len(df)*100:.1f}%")
-            with col3:
-                st.metric("Filtered Out", f"{len(df) - len(filtered_df):,}")
-            
-            # Display filtered data
-            st.dataframe(filtered_df, use_container_width=True)
-            
-            # Download filtered data
-            if len(filtered_df) > 0:
-                csv = filtered_df.to_csv(index=False)
-                st.download_button(
-                    label="💾 Download Filtered Data",
-                    data=csv,
-                    file_name=f"filtered_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-            
-            # Quick analysis of filtered data
-            if st.button("🔍 Analyze Filtered Data") and len(filtered_df) > 0:
-                with st.spinner("Analyzing filtered data..."):
-                    filtered_info = comprehensive_data_analysis(filtered_df)
-                    filter_query = f"Analyze this filtered dataset with {len(filtered_df)} rows. Compare it with the original dataset and highlight key differences, patterns, and insights."
-                    filter_insights = generate_comprehensive_insights_with_gemini(filter_query, filtered_info, model)
-                    
-                    st.markdown("**🎯 Filtered Data Insights:**")
-                    st.markdown(filter_insights.get('direct_answer', 'Analysis not available'))
-        
-        with tab5:
-            st.header("📋 Comprehensive Data Report")
-            
-            # Generate comprehensive report
-            if st.button("📊 Generate Full Report", type="primary"):
-                with st.spinner("🔄 Generating comprehensive report..."):
-                    
-                    # Report sections
-                    st.markdown("## 📋 Data Analysis Report")
-                    st.markdown(f"**Generated on:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    st.markdown("---")
-                    
-                    # Executive Summary
-                    st.markdown("### 🎯 Executive Summary")
-                    summary_query = "Provide an executive summary of this dataset suitable for business stakeholders, highlighting key findings, data quality, and business implications"
-                    summary_insights = generate_comprehensive_insights_with_gemini(summary_query, data_info, model)
-                    st.markdown(summary_insights.get('direct_answer', 'Summary not available'))
-                    
-                    # Data Overview
-                    st.markdown("### 📊 Data Overview")
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Total Records", f"{df.shape[0]:,}")
-                    with col2:
-                        st.metric("Total Columns", f"{df.shape[1]}")
-                    with col3:
-                        st.metric("Numeric Columns", f"{len(numeric_cols)}")
-                    with col4:
-                        st.metric("Categorical Columns", f"{len(categorical_cols)}")
-                    
-                    # Data Quality Assessment
-                    st.markdown("### 🔍 Data Quality Assessment")
-                    quality_metrics = data_info['data_quality']
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Completeness", f"{quality_metrics['completeness_score']:.1f}%")
-                    with col2:
-                        st.metric("Duplicate Rows", f"{quality_metrics['duplicate_rows']:,}")
-                    with col3:
-                        st.metric("Memory Usage", f"{quality_metrics['memory_usage_mb']:.1f} MB")
-                    
-                    # Key Statistics
-                    if numeric_cols:
-                        st.markdown("### 📈 Key Statistics")
-                        summary_stats = df[numeric_cols].describe().round(2)
-                        st.dataframe(summary_stats, use_container_width=True)
-                    
-                    # Visualizations
-                    st.markdown("### 📊 Key Visualizations")
-                    
-                    # Overview dashboard
-                    fig_overview = create_comprehensive_visualizations(df, 'overview_dashboard')
-                    if fig_overview:
-                        st.plotly_chart(fig_overview, use_container_width=True)
-                    
-                    # Recommendations
-                    st.markdown("### 💡 Recommendations")
-                    rec_query = "Based on this data analysis, provide specific recommendations for data improvement, further analysis, and business actions"
-                    rec_insights = generate_comprehensive_insights_with_gemini(rec_query, data_info, model)
-                    
-                    recommendations = rec_insights.get('business_insights', [])
-                    if recommendations:
-                        for i, rec in enumerate(recommendations, 1):
-                            st.markdown(f"{i}. {rec}")
-                    
-                    # Technical Details
-                    with st.expander("🔧 Technical Details"):
-                        st.markdown("**Column Information:**")
-                        col_info = pd.DataFrame({
-                            'Column': df.columns,
-                            'Data Type': [str(dtype) for dtype in df.dtypes],
-                            'Non-Null Count': [df[col].count() for col in df.columns],
-                            'Null Count': [df[col].isnull().sum() for col in df.columns],
-                            'Unique Values': [df[col].nunique() for col in df.columns]
-                        })
-                        st.dataframe(col_info, use_container_width=True)
-            
-            # Export options
-            st.markdown("### 💾 Export Options")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("📄 Export Summary Stats"):
-                    if numeric_cols:
-                        stats_csv = df[numeric_cols].describe().to_csv()
-                        st.download_button(
-                            "Download Stats CSV",
-                            stats_csv,
-                            f"summary_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                        )
-            
-            with col2:
-                if st.button("🔗 Export Correlations"):
-                    if len(numeric_cols) > 1:
-                        corr_csv = df[numeric_cols].corr().to_csv()
-                        st.download_button(
-                            "Download Correlations CSV",
-                            corr_csv,
-                            f"correlations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                        )
-            
-            with col3:
-                if st.button("📊 Export Full Dataset"):
-                    full_csv = df.to_csv(index=False)
-                    st.download_button(
-                        "Download Full Dataset",
-                        full_csv,
-                        f"full_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            # Generate AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing..."):
+                    insights = generate_comprehensive_insights_with_gemini(
+                        prompt, 
+                        st.session_state.data_info, 
+                        model
                     )
+                    
+                    # Display insights
+                    display_insights_ui(insights)
+                    
+                    # Add to chat history
+                    st.session_state.chat_history.append({
+                        "role": "assistant", 
+                        "content": insights.get('direct_answer', ''),
+                        "insights": insights
+                    })
+                    
+                    # Auto-generate primary visualization
+                    if 'primary_visualization' in insights:
+                        primary_viz = insights['primary_visualization']
+                        if primary_viz.get('chart_type'):
+                            st.subheader("📊 Primary Visualization")
+                            chart = create_comprehensive_visualizations(
+                                st.session_state.current_data,
+                                primary_viz.get('chart_type'),
+                                primary_viz.get('x_column'),
+                                primary_viz.get('y_column'),
+                                primary_viz.get('description', ''),
+                                None
+                            )
+                            if chart:
+                                st.plotly_chart(chart, use_container_width=True)
+        
+        # Quick action buttons
+        st.header("🚀 Quick Actions")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("📊 Create Dashboard", use_container_width=True):
+                chart = create_comprehensive_visualizations(
+                    st.session_state.current_data, 
+                    'overview_dashboard', 
+                    title="Data Overview Dashboard"
+                )
+                if chart:
+                    st.plotly_chart(chart, use_container_width=True)
+        
+        with col2:
+            if st.button("🔗 Show Correlations", use_container_width=True):
+                numeric_cols = st.session_state.data_info['basic_info']['numeric_columns']
+                if len(numeric_cols) > 1:
+                    chart = create_comprehensive_visualizations(
+                        st.session_state.current_data, 
+                        'correlation_heatmap',
+                        title="Correlation Analysis"
+                    )
+                    if chart:
+                        st.plotly_chart(chart, use_container_width=True)
+                else:
+                    st.warning("Need at least 2 numeric columns for correlation analysis")
+        
+        with col3:
+            if st.button("📈 Distribution Analysis", use_container_width=True):
+                numeric_cols = st.session_state.data_info['basic_info']['numeric_columns']
+                if numeric_cols:
+                    chart = create_comprehensive_visualizations(
+                        st.session_state.current_data, 
+                        'distribution_analysis',
+                        y_col=numeric_cols[0],
+                        title=f"Distribution of {numeric_cols[0]}"
+                    )
+                    if chart:
+                        st.plotly_chart(chart, use_container_width=True)
+                else:
+                    st.warning("No numeric columns found for distribution analysis")
+        
+        with col4:
+            if st.button("🎯 Data Summary", use_container_width=True):
+                st.session_state.chat_history.append({
+                    "role": "user", 
+                    "content": "Give me a comprehensive summary of my dataset"
+                })
+                st.rerun()
+        
+        # Data preview
+        with st.expander("👀 Data Preview", expanded=False):
+            st.subheader("First 10 rows of your data:")
+            st.dataframe(st.session_state.current_data.head(10), use_container_width=True)
+            
+            st.subheader("Dataset Info:")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Column Information:**")
+                info_df = pd.DataFrame({
+                    'Column': st.session_state.current_data.columns,
+                    'Type': st.session_state.current_data.dtypes.astype(str),
+                    'Non-Null': st.session_state.current_data.count(),
+                    'Null Count': st.session_state.current_data.isnull().sum()
+                })
+                st.dataframe(info_df, use_container_width=True)
+            
+            with col2:
+                st.write("**Missing Values:**")
+                missing_df = pd.DataFrame({
+                    'Column': st.session_state.current_data.columns,
+                    'Missing Count': st.session_state.current_data.isnull().sum(),
+                    'Missing %': (st.session_state.current_data.isnull().sum() / len(st.session_state.current_data) * 100).round(2)
+                })
+                missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+                if not missing_df.empty:
+                    st.dataframe(missing_df, use_container_width=True)
+                else:
+                    st.success("No missing values found! 🎉")
     
     else:
         # Welcome screen
         st.markdown("""
-        ## 🚀 Welcome to Smart Data Analysis Chat!
+        ## 👋 Welcome to Smart Data Analysis Chat!
         
-        This powerful tool combines AI-driven insights with interactive visualizations to help you understand your data better.
+        This AI-powered tool helps you analyze your data through natural language conversations.
         
-        ### ✨ Features:
-        - 🤖 **AI-Powered Analysis**: Get intelligent insights using Google's Gemini AI
-        - 📊 **Interactive Visualizations**: Create stunning charts and graphs
-        - 📈 **Statistical Analysis**: Comprehensive statistical summaries and correlations
-        - 🔍 **Data Explorer**: Filter and explore your data interactively  
-        - 📋 **Automated Reports**: Generate professional data analysis reports
-        - 💬 **Natural Language Queries**: Ask questions about your data in plain English
-        
-        ### 🏁 Getting Started:
+        ### 🚀 Getting Started:
         1. **Upload your CSV file** using the sidebar
-        2. **Explore your data** using the interactive tabs
-        3. **Ask questions** using natural language in the AI Chat tab
-        4. **Create visualizations** to better understand patterns
-        5. **Generate reports** for sharing insights
+        2. **Ask questions** about your data in plain English
+        3. **Get instant insights** with visualizations and analysis
+        4. **Explore deeper** with follow-up questions
         
-        ### 💡 Example Questions You Can Ask:
-        - "What are the main trends in my sales data?"
-        - "Which factors are most correlated with customer satisfaction?"
-        - "Are there any outliers in my revenue data?"
-        - "What's the distribution of my product categories?"
-        - "Can you identify any seasonal patterns?"
+        ### 💡 Example Questions:
+        - "What are the main patterns in my data?"
+        - "Show me the correlation between variables"
+        - "Which columns have missing values?"
+        - "Create a dashboard for my data"
+        - "Find outliers in the numeric columns"
+        - "What's the distribution of [column name]?"
         
-        **👈 Start by uploading a CSV file in the sidebar!**
+        ### 📊 Features:
+        - **Interactive Charts**: Correlation heatmaps, distributions, scatter plots
+        - **Statistical Analysis**: Comprehensive stats, outlier detection
+        - **Data Quality Assessment**: Missing values, duplicates, data types
+        - **Smart Recommendations**: Suggested visualizations and analyses
+        - **Business Insights**: Actionable findings from your data
+        
+        **Ready to start?** Upload your CSV file in the sidebar! 📂
         """)
         
-        # Sample data info
-        with st.expander("📁 Supported File Formats & Requirements"):
-            st.markdown("""
-            **Supported Formats:**
-            - CSV files (.csv)
+        # Sample data section
+        st.markdown("---")
+        st.subheader("🎯 Don't have data? Try our sample!")
+        
+        if st.button("Generate Sample Dataset", use_container_width=True):
+            # Create sample data
+            np.random.seed(42)
+            sample_data = pd.DataFrame({
+                'sales': np.random.normal(1000, 200, 100),
+                'marketing_spend': np.random.normal(500, 100, 100),
+                'customer_satisfaction': np.random.uniform(1, 5, 100),
+                'region': np.random.choice(['North', 'South', 'East', 'West'], 100),
+                'product_category': np.random.choice(['Electronics', 'Clothing', 'Books', 'Home'], 100),
+                'month': np.random.choice(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], 100)
+            })
             
-            **Requirements:**
-            - File size: Up to 200MB
-            - Encoding: UTF-8 recommended
-            - Headers: First row should contain column names
-            - Data types: Automatic detection of numeric, categorical, and date columns
+            # Add some correlations
+            sample_data['sales'] = sample_data['sales'] + sample_data['marketing_spend'] * 0.5 + np.random.normal(0, 50, 100)
+            sample_data['profit'] = sample_data['sales'] * 0.3 + np.random.normal(0, 50, 100)
             
-            **Tips for Best Results:**
-            - Clean column names (avoid special characters)
-            - Consistent date formats (YYYY-MM-DD or MM/DD/YYYY)
-            - Numeric data should be properly formatted
-            - Missing values can be represented as empty cells or 'NULL'
-            """)
+            st.session_state.current_data = sample_data
+            st.session_state.data_info = comprehensive_data_analysis(sample_data)
+            
+            st.success("✅ Sample dataset loaded! You can now start chatting with your data.")
+            st.rerun()
 
 if __name__ == "__main__":
     main()
