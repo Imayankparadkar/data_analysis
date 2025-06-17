@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: streamlit-app
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port=10000 --server.address=0.0.0.0 --server.enableCORS=false --server.headless=true --server.enableXsrfProtection=false
+    envVars:
+      - key: PORT
+        value: 10000

@@ -1,4 +1,6 @@
 [server]
 headless = true
+port = 10000
 enableCORS = false
-port = 8501
+enableXsrfProtection = false
+address = "0.0.0.0"
