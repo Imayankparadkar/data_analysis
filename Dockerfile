@@ -1,25 +1,21 @@
-# Use official Python 3.11 image
-FROM python:3.11.8-slim
+# Use official Python base image
+FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-# Set work directory
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies (e.g., ffmpeg)
-RUN apt-get update && \
-    apt-get install -y ffmpeg gcc && \
-    apt-get clean
+# Install system dependencies
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
+
+# Copy files
+COPY . /app
 
 # Install Python dependencies
-COPY requirements.txt /app/
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Copy project files
-COPY . /app/
+# Expose Streamlit port
+EXPOSE 8501
 
-# Run Streamlit app (adjust if using Flask or other)
-CMD ["streamlit", "run", "app.py", "--server.port=10000", "--server.enableCORS=false"]
+# Run the app
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
