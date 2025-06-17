@@ -2,8 +2,6 @@ services:
   - type: web
     name: data-analysis
     env: docker
-    branch: master
     plan: free
-    region: oregon
-    dockerfilePath: ./Dockerfile
-    autoDeploy: true
+    branch: main
+    repo: https://github.com/Imayankparadkar/data_analysis

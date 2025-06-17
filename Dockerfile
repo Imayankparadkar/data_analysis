@@ -1,18 +1,25 @@
-FROM python:3.11-slim
+# Use official Python 3.11 image
+FROM python:3.11.8-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && \
-    apt-get install -y ffmpeg git && \
-    apt-get clean
-
+# Set work directory
 WORKDIR /app
 
-COPY . .
+# Install system dependencies (e.g., ffmpeg)
+RUN apt-get update && \
+    apt-get install -y ffmpeg gcc && \
+    apt-get clean
 
+# Install Python dependencies
+COPY requirements.txt /app/
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-EXPOSE 8501
+# Copy project files
+COPY . /app/
 
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.enableCORS=false"]
+# Run Streamlit app (adjust if using Flask or other)
+CMD ["streamlit", "run", "app.py", "--server.port=10000", "--server.enableCORS=false"]
